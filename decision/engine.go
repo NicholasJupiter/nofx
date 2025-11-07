@@ -355,7 +355,7 @@ func formatTrendSignal(signal *market.TrendSignal) string {
 		return ""
 	}
 
-	log.Printf("\n signal: %v\n\n", signal)
+	log.Printf("\n signal: %+v\n\n", signal)
 
 	var sb strings.Builder
 	sb.WriteString("**趋势信号分析:**\n")
