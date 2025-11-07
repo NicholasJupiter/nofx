@@ -67,17 +67,18 @@ type OITopData struct {
 
 // Context 交易上下文（传递给AI的完整信息）
 type Context struct {
-	CurrentTime     string                  `json:"current_time"`
-	RuntimeMinutes  int                     `json:"runtime_minutes"`
-	CallCount       int                     `json:"call_count"`
-	Account         AccountInfo             `json:"account"`
-	Positions       []PositionInfo          `json:"positions"`
-	CandidateCoins  []CandidateCoin         `json:"candidate_coins"`
-	MarketDataMap   map[string]*market.Data `json:"-"` // 不序列化，但内部使用
-	OITopDataMap    map[string]*OITopData   `json:"-"` // OI Top数据映射
-	Performance     interface{}             `json:"-"` // 历史表现分析（logger.PerformanceAnalysis）
-	BTCETHLeverage  int                     `json:"-"` // BTC/ETH杠杆倍数（从配置读取）
-	AltcoinLeverage int                     `json:"-"` // 山寨币杠杆倍数（从配置读取）
+	CurrentTime       string                            `json:"current_time"`
+	RuntimeMinutes    int                               `json:"runtime_minutes"`
+	CallCount         int                               `json:"call_count"`
+	Account           AccountInfo                       `json:"account"`
+	Positions         []PositionInfo                    `json:"positions"`
+	CandidateCoins    []CandidateCoin                   `json:"candidate_coins"`
+	MarketDataMap     map[string]*market.Data           `json:"-"` // 不序列化，但内部使用
+	OITopDataMap      map[string]*OITopData             `json:"-"` // OI Top数据映射
+	TrendSignalsMap   map[string]*market.TrendSignal    `json:"-"` // 趋势信号映射（symbol -> TrendSignal）
+	Performance       interface{}                       `json:"-"` // 历史表现分析（logger.PerformanceAnalysis）
+	BTCETHLeverage    int                               `json:"-"` // BTC/ETH杠杆倍数（从配置读取）
+	AltcoinLeverage   int                               `json:"-"` // 山寨币杠杆倍数（从配置读取）
 }
 
 // Decision AI的交易决策
@@ -149,6 +150,7 @@ func GetFullDecisionWithCustomPrompt(ctx *Context, mcpClient *mcp.Client, custom
 func fetchMarketDataForContext(ctx *Context) error {
 	ctx.MarketDataMap = make(map[string]*market.Data)
 	ctx.OITopDataMap = make(map[string]*OITopData)
+	ctx.TrendSignalsMap = make(map[string]*market.TrendSignal)
 
 	// 收集所有需要获取数据的币种
 	symbolSet := make(map[string]bool)
@@ -200,6 +202,10 @@ func fetchMarketDataForContext(ctx *Context) error {
 		}
 
 		ctx.MarketDataMap[symbol] = data
+
+		// 计算趋势信号（EMA多周期确认 + Higher Timeframe Filter）
+		trendSignal := market.CalculateTrendSignals(data)
+		ctx.TrendSignalsMap[symbol] = trendSignal
 	}
 
 	// 加载OI Top数据（不影响主流程）
@@ -317,7 +323,12 @@ func buildHardSystemPrompt(accountEquity float64, btcEthLeverage, altcoinLeverag
 		accountEquity*0.8, accountEquity*1.5, accountEquity*5, accountEquity*10))
 	sb.WriteString(fmt.Sprintf("4. 杠杆限制: **山寨币最大%dx杠杆** | **BTC/ETH最大%dx杠杆** (⚠️ 严格执行，不可超过)\n", altcoinLeverage, btcEthLeverage))
 	sb.WriteString("5. 保证金: 总使用率 ≤ 90%\n")
-	sb.WriteString("6. 开仓金额: 建议 **≥12 USDT** (交易所最小名义价值 10 USDT + 安全边际)\n\n")
+	sb.WriteString("6. 开仓金额: 建议 **≥12 USDT** (交易所最小名义价值 10 USDT + 安全边际)\n")
+	sb.WriteString("7. **趋势信号过滤**: 优先选择满足以下条件的币种开仓:\n")
+	sb.WriteString("   - ✅ **趋势确认**: EMA20上穿EMA50 且 EMA50斜率向上（避免假突破）\n")
+	sb.WriteString("   - ✅ **时间框一致**: 高时间框(4h)和低时间框(3m)趋势方向一致\n")
+	sb.WriteString("   - ✅ **交易许可**: 允许做多时才开多仓，允许做空时才开空仓\n")
+	sb.WriteString("   - ⚠️ 如果趋势信号显示\"不建议开仓\"，除非有极强的其他信号支持，否则应避免开仓\n\n")
 
 	// 3. 输出格式 - 动态生成
 	sb.WriteString("#输出格式\n\n")
@@ -337,6 +348,59 @@ func buildHardSystemPrompt(accountEquity float64, btcEthLeverage, altcoinLeverag
 }
 
 // buildUserPrompt 构建 User Prompt（动态数据）
+// formatTrendSignal 格式化趋势信号为可读文本
+func formatTrendSignal(signal *market.TrendSignal) string {
+	if signal == nil {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("**趋势信号分析:**\n")
+
+	// 1. EMA多周期确认
+	sb.WriteString(fmt.Sprintf("- EMA交叉: %s", boolToStatus(signal.EMACrossover, "EMA20上穿EMA50", "未形成上穿")))
+	sb.WriteString(fmt.Sprintf(" | EMA50斜率: %s\n", boolToStatus(signal.EMA50SlopePositive, "向上", "向下/平")))
+	sb.WriteString(fmt.Sprintf("- 趋势确认: %s\n", boolToStatus(signal.TrendConfirmed, "✅ 已确认（EMA交叉+斜率向上）", "❌ 未确认")))
+
+	// 2. Higher Timeframe Filter
+	sb.WriteString(fmt.Sprintf("- 高时间框(4h): %s | 低时间框(3m): %s\n",
+		formatDirection(signal.HTFDirection), formatDirection(signal.LTFDirection)))
+	sb.WriteString(fmt.Sprintf("- 时间框一致: %s\n", boolToStatus(signal.HTFLTFAligned, "✅ 一致", "❌ 不一致")))
+
+	// 3. 交易许可
+	if signal.CanLong {
+		sb.WriteString("- **交易许可: ✅ 允许做多** (高低时间框均看多)\n")
+	} else if signal.CanShort {
+		sb.WriteString("- **交易许可: ⚠️ 允许做空** (高低时间框均看空)\n")
+	} else {
+		sb.WriteString("- **交易许可: 🚫 不建议开仓** (时间框不一致或趋势不明)\n")
+	}
+
+	return sb.String()
+}
+
+// boolToStatus 将布尔值转换为状态文本
+func boolToStatus(value bool, trueText, falseText string) string {
+	if value {
+		return trueText
+	}
+	return falseText
+}
+
+// formatDirection 格式化趋势方向
+func formatDirection(direction string) string {
+	switch direction {
+	case "bullish":
+		return "📈 看多"
+	case "bearish":
+		return "📉 看空"
+	case "neutral":
+		return "➖ 中性"
+	default:
+		return "❓ 未知"
+	}
+}
+
 func buildUserPrompt(ctx *Context) string {
 	var sb strings.Builder
 
@@ -378,17 +442,12 @@ func buildUserPrompt(ctx *Context) string {
 				}
 			}
 
-			sb.WriteString(fmt.Sprintf("%d. %s %s | 入场价%.4f 当前价%.4f | 盈亏%+.2f%% | 杠杆%dx | 保证金%.0f | 强平价%.4f%s\n\n",
+			sb.WriteString(fmt.Sprintf("%d. %s %s | 入场价%.4f 当前价%.4f | 盈亏%+.2f%% | 杠杆%dx | 保证金%.0f | 强平价%.4f%s\n",
 				i+1, pos.Symbol, strings.ToUpper(pos.Side),
 				pos.EntryPrice, pos.MarkPrice, pos.UnrealizedPnLPct,
 				pos.Leverage, pos.MarginUsed, pos.LiquidationPrice, holdingDuration))
-
-			// 使用FormatMarketData输出完整市场数据
-			if marketData, ok := ctx.MarketDataMap[pos.Symbol]; ok {
-				sb.WriteString(market.Format(marketData))
-				sb.WriteString("\n")
-			}
 		}
+		sb.WriteString("\n") // 持仓部分结束后添加空行
 	} else {
 		sb.WriteString("当前持仓: 无\n\n")
 	}
@@ -414,6 +473,12 @@ func buildUserPrompt(ctx *Context) string {
 		sb.WriteString(fmt.Sprintf("### %d. %s%s\n\n", displayedCount, coin.Symbol, sourceTags))
 		sb.WriteString(market.Format(marketData))
 		sb.WriteString("\n")
+
+		// 添加趋势信号分析
+		if trendSignal, hasTrend := ctx.TrendSignalsMap[coin.Symbol]; hasTrend {
+			sb.WriteString(formatTrendSignal(trendSignal))
+			sb.WriteString("\n")
+		}
 	}
 	sb.WriteString("\n")
 
