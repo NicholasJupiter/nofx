@@ -1,5 +1,7 @@
 package market
 
+import "log"
+
 // signals.go - 交易信号计算函数
 
 // TrendSignal 趋势信号结构
@@ -16,6 +18,7 @@ type TrendSignal struct {
 
 // CalculateTrendSignals 计算趋势确认信号
 func CalculateTrendSignals(data *Data) *TrendSignal {
+	log.Printf("Calculating trend signals... data:%+v", data)
 	if data == nil || data.MultiTimeframe == nil {
 		return &TrendSignal{}
 	}
