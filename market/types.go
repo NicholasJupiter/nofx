@@ -8,6 +8,7 @@ type Data struct {
 	CurrentPrice      float64
 	PriceChange1h     float64 // 1小时价格变化百分比
 	PriceChange4h     float64 // 4小时价格变化百分比
+	PriceChange1d     float64 // 1d价格变化百分比
 	CurrentEMA20      float64
 	CurrentMACD       float64
 	CurrentRSI7       float64
@@ -15,12 +16,36 @@ type Data struct {
 	FundingRate       float64
 	IntradaySeries    *IntradayData
 	LongerTermContext *LongerTermData
+	MultiTimeframe    *MultiTimeframeData // 多时间框架数据
+	MarketStructure   *MarketStructure    // 市场结构分析
+	FibLevels         *FibLevels          // 斐波那契水平
 }
 
 // OIData Open Interest数据
 type OIData struct {
 	Latest  float64
 	Average float64
+}
+
+// MultiTimeframeData 多时间框架数据
+// key 为时间框架标识（如 "3m", "4h", "1d"）
+type MultiTimeframeData map[string]*TimeframeData
+
+// TimeframeData 单个时间框架数据
+type TimeframeData struct {
+	Timeframe      string    // 时间框架标识（如 "3m", "4h"）
+	CurrentPrice   float64   // 当前价格
+	EMA20          float64   // 20期EMA
+	EMA50          float64   // 50期EMA
+	MACD           float64   // MACD指标
+	RSI7           float64   // 7期RSI
+	RSI14          float64   // 14期RSI
+	ATR14          float64   // 14期ATR
+	Volume         float64   // 成交量
+	Klines         []Kline   // K线数据
+	PriceSeries    []float64 // 价格序列
+	TrendDirection string    // 趋势方向 "bullish", "bearish", "neutral"
+	SignalStrength int       // 信号强度 0-100
 }
 
 // IntradayData 日内数据(3分钟间隔)
@@ -154,4 +179,25 @@ var config = Config{
 		CheckInterval:     5 * time.Minute,
 	},
 	UpdateInterval: 60, // 1 minute
+}
+
+// FibLevels 斐波那契水平
+type FibLevels struct {
+	Level236 float64 // 0.236
+	Level382 float64 // 0.382
+	Level500 float64 // 0.5
+	Level618 float64 // 0.618
+	Level705 float64 // 0.705
+	Level786 float64 // 0.786
+	High     float64 // 波段高点
+	Low      float64 // 波段低点
+	Trend    string  // "bullish" or "bearish"
+}
+
+// MarketStructure 市场结构
+type MarketStructure struct {
+	SwingHighs  []float64  // 波段高点序列
+	SwingLows   []float64  // 波段低点序列
+	CurrentBias string     // "bullish", "bearish", "neutral"
+	FibLevels   *FibLevels // 关联的斐波那契水平
 }

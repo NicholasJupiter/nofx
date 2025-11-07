@@ -15,13 +15,13 @@ type WSMonitor struct {
 	symbols        []string
 	featuresMap    sync.Map
 	alertsChan     chan Alert
-	klineDataMap3m sync.Map // 存储每个交易对的K线历史数据
-	klineDataMap4h sync.Map // 存储每个交易对的K线历史数据
-	tickerDataMap  sync.Map // 存储每个交易对的ticker数据
+	klineDataMaps  map[string]*sync.Map // 动态存储不同周期的K线数据，key为周期（如"3m", "4h"）
+	tickerDataMap  sync.Map             // 存储每个交易对的ticker数据
 	batchSize      int
 	filterSymbols  sync.Map // 使用sync.Map来存储需要监控的币种和其状态
 	symbolStats    sync.Map // 存储币种统计信息
 	FilterSymbol   []string //经过筛选的币种
+	intervals      []string // K线周期列表（从配置读取）
 }
 type SymbolStats struct {
 	LastActiveTime   time.Time
@@ -32,14 +32,21 @@ type SymbolStats struct {
 }
 
 var WSMonitorCli *WSMonitor
-var subKlineTime = []string{"3m", "4h"} // 管理订阅流的K线周期
 
-func NewWSMonitor(batchSize int) *WSMonitor {
+func NewWSMonitor(batchSize int, intervals []string) *WSMonitor {
+	// 初始化动态周期 map
+	klineDataMaps := make(map[string]*sync.Map)
+	for _, interval := range intervals {
+		klineDataMaps[interval] = &sync.Map{}
+	}
+
 	WSMonitorCli = &WSMonitor{
 		wsClient:       NewWSClient(),
 		combinedClient: NewCombinedStreamsClient(batchSize),
 		alertsChan:     make(chan Alert, 1000),
 		batchSize:      batchSize,
+		klineDataMaps:  klineDataMaps,
+		intervals:      intervals,
 	}
 	return WSMonitorCli
 }
@@ -82,34 +89,28 @@ func (m *WSMonitor) initializeHistoricalData() error {
 	semaphore := make(chan struct{}, 5) // 限制并发数
 
 	for _, symbol := range m.symbols {
-		wg.Add(1)
-		semaphore <- struct{}{}
+		for _, interval := range m.intervals {
+			wg.Add(1)
+			semaphore <- struct{}{}
 
-		go func(s string) {
-			defer wg.Done()
-			defer func() { <-semaphore }()
+			go func(s, intv string) {
+				defer wg.Done()
+				defer func() { <-semaphore }()
 
-			// 获取历史K线数据
-			klines, err := apiClient.GetKlines(s, "3m", 100)
-			if err != nil {
-				log.Printf("获取 %s 历史数据失败: %v", s, err)
-				return
-			}
-			if len(klines) > 0 {
-				m.klineDataMap3m.Store(s, klines)
-				log.Printf("已加载 %s 的历史K线数据-3m: %d 条", s, len(klines))
-			}
-			// 获取历史K线数据
-			klines4h, err := apiClient.GetKlines(s, "4h", 100)
-			if err != nil {
-				log.Printf("获取 %s 历史数据失败: %v", s, err)
-				return
-			}
-			if len(klines4h) > 0 {
-				m.klineDataMap4h.Store(s, klines4h)
-				log.Printf("已加载 %s 的历史K线数据-4h: %d 条", s, len(klines4h))
-			}
-		}(symbol)
+				// 获取历史K线数据
+				klines, err := apiClient.GetKlines(s, intv, 100)
+				if err != nil {
+					log.Printf("获取 %s 历史数据(%s)失败: %v", s, intv, err)
+					return
+				}
+				if len(klines) > 0 {
+					if dataMap, ok := m.klineDataMaps[intv]; ok {
+						dataMap.Store(s, klines)
+						log.Printf("已加载 %s 的历史K线数据-%s: %d 条", s, intv, len(klines))
+					}
+				}
+			}(symbol, interval)
+		}
 	}
 
 	wg.Wait()
@@ -152,14 +153,14 @@ func (m *WSMonitor) subscribeAll() error {
 	// 执行批量订阅
 	log.Println("开始订阅所有交易对...")
 	for _, symbol := range m.symbols {
-		for _, st := range subKlineTime {
-			m.subscribeSymbol(symbol, st)
+		for _, interval := range m.intervals {
+			m.subscribeSymbol(symbol, interval)
 		}
 	}
-	for _, st := range subKlineTime {
-		err := m.combinedClient.BatchSubscribeKlines(m.symbols, st)
+	for _, interval := range m.intervals {
+		err := m.combinedClient.BatchSubscribeKlines(m.symbols, interval)
 		if err != nil {
-			log.Printf("❌ 订阅 %s K线失败: %v", st, err)
+			log.Printf("❌ 订阅 %s K线失败: %v", interval, err)
 			return err
 		}
 	}
@@ -179,15 +180,14 @@ func (m *WSMonitor) handleKlineData(symbol string, ch <-chan []byte, _time strin
 }
 
 func (m *WSMonitor) getKlineDataMap(_time string) *sync.Map {
-	var klineDataMap *sync.Map
-	if _time == "3m" {
-		klineDataMap = &m.klineDataMap3m
-	} else if _time == "4h" {
-		klineDataMap = &m.klineDataMap4h
-	} else {
-		klineDataMap = &sync.Map{}
+	if dataMap, ok := m.klineDataMaps[_time]; ok {
+		return dataMap
 	}
-	return klineDataMap
+	// 如果周期不存在，创建新的 map 并返回
+	log.Printf("⚠️  周期 %s 不在配置中，动态创建", _time)
+	newMap := &sync.Map{}
+	m.klineDataMaps[_time] = newMap
+	return newMap
 }
 func (m *WSMonitor) processKlineUpdate(symbol string, wsData KlineWSData, _time string) {
 	// 转换WebSocket数据为Kline结构

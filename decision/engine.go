@@ -82,8 +82,8 @@ type Context struct {
 
 // Decision AI的交易决策
 type Decision struct {
-	Symbol          string  `json:"symbol"`
-	Action          string  `json:"action"` // "open_long", "open_short", "close_long", "close_short", "update_stop_loss", "update_take_profit", "partial_close", "hold", "wait"
+	Symbol string `json:"symbol"`
+	Action string `json:"action"` // "open_long", "open_short", "close_long", "close_short", "update_stop_loss", "update_take_profit", "partial_close", "hold", "wait"
 
 	// 开仓参数
 	Leverage        int     `json:"leverage,omitempty"`
@@ -92,14 +92,14 @@ type Decision struct {
 	TakeProfit      float64 `json:"take_profit,omitempty"`
 
 	// 调整参数（新增）
-	NewStopLoss     float64 `json:"new_stop_loss,omitempty"`     // 用于 update_stop_loss
-	NewTakeProfit   float64 `json:"new_take_profit,omitempty"`   // 用于 update_take_profit
-	ClosePercentage float64 `json:"close_percentage,omitempty"`  // 用于 partial_close (0-100)
+	NewStopLoss     float64 `json:"new_stop_loss,omitempty"`    // 用于 update_stop_loss
+	NewTakeProfit   float64 `json:"new_take_profit,omitempty"`  // 用于 update_take_profit
+	ClosePercentage float64 `json:"close_percentage,omitempty"` // 用于 partial_close (0-100)
 
 	// 通用参数
-	Confidence      int     `json:"confidence,omitempty"` // 信心度 (0-100)
-	RiskUSD         float64 `json:"risk_usd,omitempty"`   // 最大美元风险
-	Reasoning       string  `json:"reasoning"`
+	Confidence int     `json:"confidence,omitempty"` // 信心度 (0-100)
+	RiskUSD    float64 `json:"risk_usd,omitempty"`   // 最大美元风险
+	Reasoning  string  `json:"reasoning"`
 }
 
 // FullDecision AI的完整决策（包含思维链）
@@ -431,6 +431,32 @@ func buildUserPrompt(ctx *Context) string {
 		}
 	}
 
+	// ==================== 新增：市场状态摘要 ====================
+	sb.WriteString("## 🌊 市场状态摘要\n")
+	trendingCount, rangingCount, volatileCount := 0, 0, 0
+	for symbol, data := range ctx.MarketDataMap {
+		if symbol == "BTCUSDT" {
+			continue // BTC已经在上面显示过了
+		}
+		condition := market.DetectMarketCondition(data)
+		switch condition.Condition {
+		case "trending":
+			trendingCount++
+		case "ranging":
+			rangingCount++
+		case "volatile":
+			volatileCount++
+		}
+	}
+
+	sb.WriteString(fmt.Sprintf("- 📈 趋势市: %d个币种\n", trendingCount))
+	sb.WriteString(fmt.Sprintf("- 🔄 震荡市: %d个币种\n", rangingCount))
+	sb.WriteString(fmt.Sprintf("- 🌊 波动市: %d个币种\n\n", volatileCount))
+
+	if rangingCount > len(ctx.MarketDataMap)/2 {
+		sb.WriteString("🚨 **市场整体处于震荡状态**：建议谨慎开仓，耐心等待趋势突破！\n\n")
+	}
+
 	sb.WriteString("---\n\n")
 	sb.WriteString("现在请分析并输出决策（思维链 + JSON）\n")
 
@@ -695,8 +721,8 @@ func validateDecision(d *Decision, accountEquity float64, btcEthLeverage, altcoi
 
 		// ✅ 验证最小开仓金额（防止数量格式化为 0 的错误）
 		// Binance 最小名义价值 10 USDT + 安全边际
-		const minPositionSizeGeneral = 12.0   // 10 + 20% 安全边际
-		const minPositionSizeBTCETH = 60.0    // BTC/ETH 因价格高和精度限制需要更大金额（更灵活）
+		const minPositionSizeGeneral = 12.0 // 10 + 20% 安全边际
+		const minPositionSizeBTCETH = 60.0  // BTC/ETH 因价格高和精度限制需要更大金额（更灵活）
 
 		if d.Symbol == "BTCUSDT" || d.Symbol == "ETHUSDT" {
 			if d.PositionSizeUSD < minPositionSizeBTCETH {

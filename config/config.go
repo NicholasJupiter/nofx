@@ -64,6 +64,11 @@ type TelegramConfig struct {
 	MinLevel string `json:"min_level"` // 最低日志级别，该级别及以上的日志会推送到Telegram（可选，默认: error）
 }
 
+// MarketConfig 市场数据配置
+type MarketConfig struct {
+	KlineIntervals []string `json:"kline_intervals"` // K线周期列表，如 ["3m", "4h", "1h"]
+}
+
 // Config 总配置
 type Config struct {
 	Traders            []TraderConfig `json:"traders"`
@@ -75,6 +80,7 @@ type Config struct {
 	StopTradingMinutes int            `json:"stop_trading_minutes"`
 	Leverage           LeverageConfig `json:"leverage"` // 杠杆配置
 	Log                *LogConfig     `json:"log"`      // 日志配置（可选）
+	Market             *MarketConfig  `json:"market"`   // 市场数据配置（可选）
 }
 
 // LoadConfig 从文件加载配置
@@ -106,6 +112,16 @@ func LoadConfig(filename string) (*Config, error) {
 			"ADAUSDT",
 			"HYPEUSDT",
 		}
+	}
+
+	// 设置市场配置默认值
+	if config.Market == nil {
+		config.Market = &MarketConfig{
+			KlineIntervals: []string{"3m", "4h"}, // 默认使用3分钟和4小时周期
+		}
+	}
+	if len(config.Market.KlineIntervals) == 0 {
+		config.Market.KlineIntervals = []string{"3m", "4h"}
 	}
 
 	// 验证配置

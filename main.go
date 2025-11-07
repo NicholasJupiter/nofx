@@ -25,6 +25,11 @@ type LeverageConfig struct {
 	AltcoinLeverage int `json:"altcoin_leverage"`
 }
 
+// MarketConfig 市场配置
+type MarketConfig struct {
+	KlineIntervals []string `json:"kline_intervals"` // K线周期列表
+}
+
 // ConfigFile 配置文件结构，只包含需要同步到数据库的字段
 type ConfigFile struct {
 	AdminMode          bool              `json:"admin_mode"`
@@ -40,7 +45,8 @@ type ConfigFile struct {
 	Leverage           LeverageConfig    `json:"leverage"`
 	JWTSecret          string            `json:"jwt_secret"`
 	DataKLineTime      string            `json:"data_k_line_time"`
-	Log                *config.LogConfig `json:"log"` // 日志配置
+	Log                *config.LogConfig `json:"log"`    // 日志配置
+	Market             *MarketConfig     `json:"market"` // 市场配置
 }
 
 // loadConfigFile 读取并解析config.json文件
@@ -327,9 +333,18 @@ func main() {
 		}
 	}()
 
+	// 获取K线周期配置
+	klineIntervals := []string{"3m", "4h"} // 默认值
+	if configFile != nil && configFile.Market != nil && len(configFile.Market.KlineIntervals) > 0 {
+		klineIntervals = configFile.Market.KlineIntervals
+		log.Printf("✓ 从config.json加载K线周期: %v", klineIntervals)
+	} else {
+		log.Printf("⚠️  config.json中未配置K线周期，使用默认值: %v", klineIntervals)
+	}
+
 	// 启动流行情数据 - 默认使用所有交易员设置的币种 如果没有设置币种 则优先使用系统默认
-	go market.NewWSMonitor(150).Start(database.GetCustomCoins())
-	//go market.NewWSMonitor(150).Start([]string{}) //这里是一个使用方式 传入空的话 则使用market市场的所有币种
+	go market.NewWSMonitor(150, klineIntervals).Start(database.GetCustomCoins())
+	//go market.NewWSMonitor(150, klineIntervals).Start([]string{}) //这里是一个使用方式 传入空的话 则使用market市场的所有币种
 	// 设置优雅退出
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
