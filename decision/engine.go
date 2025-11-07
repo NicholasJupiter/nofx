@@ -67,18 +67,18 @@ type OITopData struct {
 
 // Context 交易上下文（传递给AI的完整信息）
 type Context struct {
-	CurrentTime       string                            `json:"current_time"`
-	RuntimeMinutes    int                               `json:"runtime_minutes"`
-	CallCount         int                               `json:"call_count"`
-	Account           AccountInfo                       `json:"account"`
-	Positions         []PositionInfo                    `json:"positions"`
-	CandidateCoins    []CandidateCoin                   `json:"candidate_coins"`
-	MarketDataMap     map[string]*market.Data           `json:"-"` // 不序列化，但内部使用
-	OITopDataMap      map[string]*OITopData             `json:"-"` // OI Top数据映射
-	TrendSignalsMap   map[string]*market.TrendSignal    `json:"-"` // 趋势信号映射（symbol -> TrendSignal）
-	Performance       interface{}                       `json:"-"` // 历史表现分析（logger.PerformanceAnalysis）
-	BTCETHLeverage    int                               `json:"-"` // BTC/ETH杠杆倍数（从配置读取）
-	AltcoinLeverage   int                               `json:"-"` // 山寨币杠杆倍数（从配置读取）
+	CurrentTime     string                         `json:"current_time"`
+	RuntimeMinutes  int                            `json:"runtime_minutes"`
+	CallCount       int                            `json:"call_count"`
+	Account         AccountInfo                    `json:"account"`
+	Positions       []PositionInfo                 `json:"positions"`
+	CandidateCoins  []CandidateCoin                `json:"candidate_coins"`
+	MarketDataMap   map[string]*market.Data        `json:"-"` // 不序列化，但内部使用
+	OITopDataMap    map[string]*OITopData          `json:"-"` // OI Top数据映射
+	TrendSignalsMap map[string]*market.TrendSignal `json:"-"` // 趋势信号映射（symbol -> TrendSignal）
+	Performance     interface{}                    `json:"-"` // 历史表现分析（logger.PerformanceAnalysis）
+	BTCETHLeverage  int                            `json:"-"` // BTC/ETH杠杆倍数（从配置读取）
+	AltcoinLeverage int                            `json:"-"` // 山寨币杠杆倍数（从配置读取）
 }
 
 // Decision AI的交易决策
@@ -350,9 +350,12 @@ func buildHardSystemPrompt(accountEquity float64, btcEthLeverage, altcoinLeverag
 // buildUserPrompt 构建 User Prompt（动态数据）
 // formatTrendSignal 格式化趋势信号为可读文本
 func formatTrendSignal(signal *market.TrendSignal) string {
+
 	if signal == nil {
 		return ""
 	}
+
+	log.Printf("\n signal: %v\n\n", signal)
 
 	var sb strings.Builder
 	sb.WriteString("**趋势信号分析:**\n")
