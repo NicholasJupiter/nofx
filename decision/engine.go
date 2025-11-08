@@ -348,6 +348,24 @@ func buildHardSystemPrompt(accountEquity float64, btcEthLeverage, altcoinLeverag
 }
 
 // buildUserPrompt 构建 User Prompt（动态数据）
+// formatMarketStateTag 格式化市场状态标识
+func formatMarketStateTag(condition *market.MarketCondition) string {
+	if condition == nil {
+		return ""
+	}
+
+	switch condition.Condition {
+	case "trending":
+		return " | 📈趋势市"
+	case "ranging":
+		return fmt.Sprintf(" | 🔄震荡市(置信度%d%%)", condition.Confidence)
+	case "volatile":
+		return " | 🌊波动市"
+	default:
+		return ""
+	}
+}
+
 // formatTrendSignal 格式化趋势信号为可读文本
 func formatTrendSignal(signal *market.TrendSignal) string {
 
@@ -427,6 +445,12 @@ func buildUserPrompt(ctx *Context) string {
 		ctx.Account.MarginUsedPct,
 		ctx.Account.PositionCount))
 
+	// 预先计算所有币种的市场状态（避免重复计算）
+	marketConditionMap := make(map[string]*market.MarketCondition)
+	for symbol, data := range ctx.MarketDataMap {
+		marketConditionMap[symbol] = market.DetectMarketCondition(data)
+	}
+
 	// 持仓（完整市场数据）
 	if len(ctx.Positions) > 0 {
 		sb.WriteString("## 当前持仓\n")
@@ -445,18 +469,10 @@ func buildUserPrompt(ctx *Context) string {
 				}
 			}
 
-			// 获取市场状态
+			// 获取市场状态（使用缓存）
 			marketStateTag := ""
-			if marketData, hasData := ctx.MarketDataMap[pos.Symbol]; hasData {
-				condition := market.DetectMarketCondition(marketData)
-				switch condition.Condition {
-				case "trending":
-					marketStateTag = " | 📈趋势市"
-				case "ranging":
-					marketStateTag = fmt.Sprintf(" | 🔄震荡市(置信度%d%%)", condition.Confidence)
-				case "volatile":
-					marketStateTag = " | 🌊波动市"
-				}
+			if condition, ok := marketConditionMap[pos.Symbol]; ok {
+				marketStateTag = formatMarketStateTag(condition)
 			}
 
 			sb.WriteString(fmt.Sprintf("%d. %s %s | 入场价%.4f 当前价%.4f | 盈亏%+.2f%% | 杠杆%dx | 保证金%.0f | 强平价%.4f%s%s\n",
@@ -477,6 +493,13 @@ func buildUserPrompt(ctx *Context) string {
 		if !hasData {
 			continue
 		}
+
+		// 获取市场状态（使用缓存）
+		marketStateTag := ""
+		if condition, ok := marketConditionMap[coin.Symbol]; ok {
+			marketStateTag = formatMarketStateTag(condition)
+		}
+
 		displayedCount++
 
 		sourceTags := ""
@@ -487,7 +510,7 @@ func buildUserPrompt(ctx *Context) string {
 		}
 
 		// 使用FormatMarketData输出完整市场数据
-		sb.WriteString(fmt.Sprintf("### %d. %s%s\n\n", displayedCount, coin.Symbol, sourceTags))
+		sb.WriteString(fmt.Sprintf("### %d. %s%s%s\n\n", displayedCount, coin.Symbol, sourceTags, marketStateTag))
 		sb.WriteString(market.Format(marketData))
 		sb.WriteString("\n")
 
@@ -516,11 +539,10 @@ func buildUserPrompt(ctx *Context) string {
 	// ==================== 新增：市场状态摘要 ====================
 	sb.WriteString("## 🌊 市场状态摘要\n")
 	trendingCount, rangingCount, volatileCount := 0, 0, 0
-	for symbol, data := range ctx.MarketDataMap {
+	for symbol, condition := range marketConditionMap {
 		if symbol == "BTCUSDT" {
 			continue // BTC已经在上面显示过了
 		}
-		condition := market.DetectMarketCondition(data)
 		switch condition.Condition {
 		case "trending":
 			trendingCount++
