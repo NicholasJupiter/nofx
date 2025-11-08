@@ -331,11 +331,12 @@ func buildHardSystemPrompt(accountEquity float64, btcEthLeverage, altcoinLeverag
 	sb.WriteString("   - ⚠️ **关键**: 利润必须 **> 0.1%** 才有净利润！\n")
 	sb.WriteString("   - 💡 **止盈建议**: 趋势市利润≥+2.5%止盈 | 震荡市利润≥+1.5%止盈（确保净利润足够覆盖手续费）\n")
 	sb.WriteString("   - 📉 **不建议平仓**: 利润 < +1% 时（除非震荡市持仓过久或有明显反转信号）\n\n")
-	sb.WriteString("8. **趋势信号过滤**: 优先选择满足以下条件的币种开仓:\n")
-	sb.WriteString("   - ✅ **趋势确认**: EMA20上穿EMA50 且 EMA50斜率向上（避免假突破）\n")
-	sb.WriteString("   - ✅ **时间框一致**: 高时间框(4h)和低时间框(3m)趋势方向一致\n")
-	sb.WriteString("   - ✅ **交易许可**: 允许做多时才开多仓，允许做空时才开空仓\n")
-	sb.WriteString("   - ⚠️ 如果趋势信号显示\"不建议开仓\"，除非有极强的其他信号支持，否则应避免开仓\n\n")
+	sb.WriteString("8. **趋势信号过滤** (⚠️ 方案A修复):\n")
+	sb.WriteString("   - ✅ **趋势确认**: 价格>EMA20 且 EMA20>EMA50 且 MACD>0（3个信号都满足）\n")
+	sb.WriteString("   - ✅ **时间框一致**: 高时间框(1h)和低时间框(15m)趋势方向一致（更适合30分钟-2小时持仓）\n")
+	sb.WriteString("   - ✅ **交易许可**: 系统标注\"✅ 允许做多\"时才开多仓，\"⚠️ 允许做空\"时才开空仓\n")
+	sb.WriteString("   - ⚠️ 如果趋势信号显示\"🚫 不建议开仓\"，绝对不要开仓\n")
+	sb.WriteString("   - 🚫 **震荡市禁入**: 如果持仓或候选币种标注为\"🔄震荡市\"，绝对不要开新仓\n\n")
 
 	// 3. 输出格式 - 动态生成
 	sb.WriteString("#输出格式\n\n")

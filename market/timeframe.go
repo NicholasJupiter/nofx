@@ -187,27 +187,50 @@ func determineTrendDirection(price, ema20, ema50, macd float64) string {
 	bullishSignals := 0
 	bearishSignals := 0
 
+	// 信号1: 价格与 EMA20 关系
 	if price > ema20 && ema20 > 0 {
 		bullishSignals++
 	} else if price < ema20 && ema20 > 0 {
 		bearishSignals++
 	}
 
+	// 信号2: EMA20 与 EMA50 关系（趋势方向）
 	if ema20 > ema50 && ema50 > 0 {
 		bullishSignals++
 	} else if ema20 < ema50 && ema50 > 0 {
 		bearishSignals++
 	}
 
-	if macd > 0.001 {
+	// 信号3: MACD 趋势
+	// ⚠️ 方案A修复：动态计算 MACD 阈值（相对于价格）
+	// 原配置（注释）：固定阈值 0.001，对高价币种（如 BTC ~100,000）太小
+	// if macd > 0.001 {
+	// 	bullishSignals++
+	// } else if macd < -0.001 {
+	// 	bearishSignals++
+	// }
+
+	// 新配置：使用价格的 0.01% 作为动态阈值
+	// 例如：BTC (100,000) 阈值 = 10，ETH (3,500) 阈值 = 0.35
+	macdThreshold := price * 0.0001 // 0.01% 的价格
+	if macd > macdThreshold {
 		bullishSignals++
-	} else if macd < -0.001 {
+	} else if macd < -macdThreshold {
 		bearishSignals++
 	}
 
-	if bullishSignals >= 2 {
+	// ⚠️ 方案A修复：提高趋势判断标准，要求 3 个信号都满足（而不是 2 个）
+	// 原配置（注释）：只需要 2/3 信号满足，容易产生虚假信号
+	// if bullishSignals >= 2 {
+	// 	return "bullish"
+	// } else if bearishSignals >= 2 {
+	// 	return "bearish"
+	// }
+
+	// 新配置：需要 3 个信号都满足，确保趋势明确
+	if bullishSignals == 3 {
 		return "bullish"
-	} else if bearishSignals >= 2 {
+	} else if bearishSignals == 3 {
 		return "bearish"
 	}
 	return "neutral"

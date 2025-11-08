@@ -33,9 +33,15 @@ func CalculateTrendSignals(data *Data) *TrendSignal {
 	}
 
 	// 2. 计算 Higher Timeframe Filter（高时间框架过滤）
-	// 使用 4h 作为高时间框架，3m 作为低时间框架
-	htfTF, htfOk := (*data.MultiTimeframe)["4h"]
-	ltfTF, ltfOk := (*data.MultiTimeframe)["3m"]
+	// ⚠️ 方案A修复：调整时间框架组合，更适合30分钟-2小时持仓
+	// 原配置（注释）：使用 4h 作为高时间框架，3m 作为低时间框架
+	// 问题：4h 和 3m 差距 80 倍，几乎不可能一致，且 3m 噪音太多
+	// htfTF, htfOk := (*data.MultiTimeframe)["4h"]
+	// ltfTF, ltfOk := (*data.MultiTimeframe)["3m"]
+
+	// 新配置：使用 1h 作为高时间框架，15m 作为低时间框架（差距仅 4 倍）
+	htfTF, htfOk := (*data.MultiTimeframe)["1h"]
+	ltfTF, ltfOk := (*data.MultiTimeframe)["15m"]
 
 	if htfOk && ltfOk && htfTF != nil && ltfTF != nil {
 		signal.HTFDirection = htfTF.TrendDirection
@@ -121,11 +127,12 @@ func GetTradingPermission(data *Data) (canLong bool, canShort bool, reason strin
 	signal := CalculateTrendSignals(data)
 
 	if signal.CanLong {
-		return true, false, "HTF(4h) 和 LTF(3m) 均看多，允许做多"
+		// ⚠️ 方案A修复：更新说明文字以匹配新的时间框架
+		return true, false, "HTF(1h) 和 LTF(15m) 均看多，允许做多"
 	}
 
 	if signal.CanShort {
-		return false, true, "HTF(4h) 和 LTF(3m) 均看空，允许做空"
+		return false, true, "HTF(1h) 和 LTF(15m) 均看空，允许做空"
 	}
 
 	// 分析不允许交易的原因
