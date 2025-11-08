@@ -445,10 +445,24 @@ func buildUserPrompt(ctx *Context) string {
 				}
 			}
 
-			sb.WriteString(fmt.Sprintf("%d. %s %s | 入场价%.4f 当前价%.4f | 盈亏%+.2f%% | 杠杆%dx | 保证金%.0f | 强平价%.4f%s\n",
+			// 获取市场状态
+			marketStateTag := ""
+			if marketData, hasData := ctx.MarketDataMap[pos.Symbol]; hasData {
+				condition := market.DetectMarketCondition(marketData)
+				switch condition.Condition {
+				case "trending":
+					marketStateTag = " | 📈趋势市"
+				case "ranging":
+					marketStateTag = fmt.Sprintf(" | 🔄震荡市(置信度%d%%)", condition.Confidence)
+				case "volatile":
+					marketStateTag = " | 🌊波动市"
+				}
+			}
+
+			sb.WriteString(fmt.Sprintf("%d. %s %s | 入场价%.4f 当前价%.4f | 盈亏%+.2f%% | 杠杆%dx | 保证金%.0f | 强平价%.4f%s%s\n",
 				i+1, pos.Symbol, strings.ToUpper(pos.Side),
 				pos.EntryPrice, pos.MarkPrice, pos.UnrealizedPnLPct,
-				pos.Leverage, pos.MarginUsed, pos.LiquidationPrice, holdingDuration))
+				pos.Leverage, pos.MarginUsed, pos.LiquidationPrice, holdingDuration, marketStateTag))
 		}
 		sb.WriteString("\n") // 持仓部分结束后添加空行
 	} else {
