@@ -686,7 +686,52 @@ func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
 		performance = nil
 	}
 
-	// 6. 构建上下文
+	// 6. 提取最近5笔交易记录（用于防止追单）
+	var recentTrades []decision.RecentTrade
+	if performance != nil && len(performance.RecentTrades) > 0 {
+		// 最多取5笔
+		maxTrades := 5
+		if len(performance.RecentTrades) < maxTrades {
+			maxTrades = len(performance.RecentTrades)
+		}
+
+		for i := 0; i < maxTrades; i++ {
+			trade := performance.RecentTrades[i]
+
+			// 推导 action（基于 side）
+			action := ""
+			if trade.Side == "long" {
+				action = "close_long"
+			} else if trade.Side == "short" {
+				action = "close_short"
+			}
+
+			// 推导 close_reason（基于 WasStopLoss）
+			closeReason := ""
+			if trade.WasStopLoss {
+				closeReason = "止损"
+			} else if trade.PnL > 0 {
+				closeReason = "止盈"
+			} else {
+				closeReason = "平仓"
+			}
+
+			recentTrades = append(recentTrades, decision.RecentTrade{
+				Symbol:       trade.Symbol,
+				Side:         trade.Side,
+				Action:       action,
+				EntryPrice:   trade.OpenPrice,
+				ExitPrice:    trade.ClosePrice,
+				PnL:          trade.PnL,
+				PnLPercent:   trade.PnLPct,
+				CloseTime:    trade.CloseTime,
+				HoldDuration: trade.Duration,
+				CloseReason:  closeReason,
+			})
+		}
+	}
+
+	// 7. 构建上下文
 	ctx := &decision.Context{
 		CurrentTime:     time.Now().Format("2006-01-02 15:04:05"),
 		RuntimeMinutes:  int(time.Since(at.startTime).Minutes()),
@@ -704,7 +749,8 @@ func (at *AutoTrader) buildTradingContext() (*decision.Context, error) {
 		},
 		Positions:      positionInfos,
 		CandidateCoins: candidateCoins,
-		Performance:    performance, // 添加历史表现分析
+		RecentTrades:   recentTrades, // ⚠️ 新增：最近5笔交易记录（防止追单）
+		Performance:    performance,  // 添加历史表现分析
 	}
 
 	return ctx, nil

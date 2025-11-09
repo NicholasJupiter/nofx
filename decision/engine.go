@@ -65,6 +65,20 @@ type OITopData struct {
 	NetShort          float64 // 净空仓
 }
 
+// RecentTrade 最近交易记录（用于防止追单）
+type RecentTrade struct {
+	Symbol       string    `json:"symbol"`
+	Side         string    `json:"side"`   // "long" or "short"
+	Action       string    `json:"action"` // "open" or "close"
+	EntryPrice   float64   `json:"entry_price"`
+	ExitPrice    float64   `json:"exit_price"`
+	PnL          float64   `json:"pnl"`
+	PnLPercent   float64   `json:"pnl_percent"`
+	CloseTime    time.Time `json:"close_time"`
+	HoldDuration string    `json:"hold_duration"` // 持仓时长
+	CloseReason  string    `json:"close_reason"`  // 平仓原因
+}
+
 // Context 交易上下文（传递给AI的完整信息）
 type Context struct {
 	CurrentTime     string                         `json:"current_time"`
@@ -73,12 +87,13 @@ type Context struct {
 	Account         AccountInfo                    `json:"account"`
 	Positions       []PositionInfo                 `json:"positions"`
 	CandidateCoins  []CandidateCoin                `json:"candidate_coins"`
-	MarketDataMap   map[string]*market.Data        `json:"-"` // 不序列化，但内部使用
-	OITopDataMap    map[string]*OITopData          `json:"-"` // OI Top数据映射
-	TrendSignalsMap map[string]*market.TrendSignal `json:"-"` // 趋势信号映射（symbol -> TrendSignal）
-	Performance     interface{}                    `json:"-"` // 历史表现分析（logger.PerformanceAnalysis）
-	BTCETHLeverage  int                            `json:"-"` // BTC/ETH杠杆倍数（从配置读取）
-	AltcoinLeverage int                            `json:"-"` // 山寨币杠杆倍数（从配置读取）
+	RecentTrades    []RecentTrade                  `json:"recent_trades"` // ⚠️ 新增：最近5笔交易记录（防止追单）
+	MarketDataMap   map[string]*market.Data        `json:"-"`             // 不序列化，但内部使用
+	OITopDataMap    map[string]*OITopData          `json:"-"`             // OI Top数据映射
+	TrendSignalsMap map[string]*market.TrendSignal `json:"-"`             // 趋势信号映射（symbol -> TrendSignal）
+	Performance     interface{}                    `json:"-"`             // 历史表现分析（logger.PerformanceAnalysis）
+	BTCETHLeverage  int                            `json:"-"`             // BTC/ETH杠杆倍数（从配置读取）
+	AltcoinLeverage int                            `json:"-"`             // 山寨币杠杆倍数（从配置读取）
 }
 
 // Decision AI的交易决策
@@ -337,6 +352,12 @@ func buildHardSystemPrompt(accountEquity float64, btcEthLeverage, altcoinLeverag
 	sb.WriteString("   - ✅ **交易许可**: 系统标注\"✅ 允许做多\"时才开多仓，\"⚠️ 允许做空\"时才开空仓\n")
 	sb.WriteString("   - ⚠️ 如果趋势信号显示\"🚫 不建议开仓\"，绝对不要开仓\n")
 	sb.WriteString("   - 🚫 **震荡市禁入**: 如果持仓或候选币种标注为\"🔄震荡市\"，绝对不要开新仓\n\n")
+	sb.WriteString("9. **防止追单规则** (⚠️ 关键！宁可不做，不做低质量交易):\n")
+	sb.WriteString("   - 🚫 **30分钟冷却期**: 刚止损的币种，30分钟内不要再开同方向仓位（避免重复错误）\n")
+	sb.WriteString("   - 🚫 **同币种频率限制**: 同一币种，1小时内最多开仓1次（防止追涨杀跌）\n")
+	sb.WriteString("   - 💡 **宁可不做原则**: 信心度<85的交易，直接放弃（宁可错过，不做低质量交易）\n")
+	sb.WriteString("   - ⚠️ **必读历史**: 查看\"最近交易记录\"，避免重复之前的失败交易模式\n")
+	sb.WriteString("   - 📊 **开仓前三问**: ①趋势是否明确? ②是否刚止损过同币种? ③信心度是否≥85? 三个都YES才开仓\n\n")
 
 	// 3. 输出格式 - 动态生成
 	sb.WriteString("#输出格式\n\n")
@@ -452,6 +473,34 @@ func buildUserPrompt(ctx *Context) string {
 		ctx.Account.TotalPnLPct,
 		ctx.Account.MarginUsedPct,
 		ctx.Account.PositionCount))
+
+	// ⚠️ 新增：显示最近5笔交易（防止追单）
+	if len(ctx.RecentTrades) > 0 {
+		sb.WriteString("## 最近交易记录（防止追单）\n")
+		for i, trade := range ctx.RecentTrades {
+			// 计算距离现在的时间
+			timeSince := time.Since(trade.CloseTime)
+			timeAgo := ""
+			if timeSince.Minutes() < 60 {
+				timeAgo = fmt.Sprintf("%.0f分钟前", timeSince.Minutes())
+			} else {
+				timeAgo = fmt.Sprintf("%.1f小时前", timeSince.Hours())
+			}
+
+			// 格式化盈亏
+			pnlSign := ""
+			if trade.PnL > 0 {
+				pnlSign = "+"
+			}
+
+			sb.WriteString(fmt.Sprintf("%d. %s %s | 入场%.4f 出场%.4f | 盈亏%s%.2f USDT (%s%.2f%%) | 持仓%s | %s (%s)\n",
+				i+1, trade.Symbol, strings.ToUpper(trade.Side),
+				trade.EntryPrice, trade.ExitPrice,
+				pnlSign, trade.PnL, pnlSign, trade.PnLPercent,
+				trade.HoldDuration, trade.CloseReason, timeAgo))
+		}
+		sb.WriteString("\n⚠️ 注意：刚止损的币种，30分钟内不要再开同方向仓位！避免追单！\n\n")
+	}
 
 	// 预先计算所有币种的市场状态（避免重复计算）
 	marketConditionMap := make(map[string]*market.MarketCondition)
