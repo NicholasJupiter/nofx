@@ -89,14 +89,14 @@ func (client *Client) SetQwenAPIKey(apiKey string, customURL string, customModel
 		client.BaseURL = customURL
 		log.Printf("🔧 [MCP] Qwen 使用自定义 BaseURL: %s", customURL)
 	} else {
-		client.BaseURL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+		client.BaseURL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
 		log.Printf("🔧 [MCP] Qwen 使用默认 BaseURL: %s", client.BaseURL)
 	}
 	if customModel != "" {
 		client.Model = customModel
 		log.Printf("🔧 [MCP] Qwen 使用自定义 Model: %s", customModel)
 	} else {
-		client.Model = "qwen3-max" 
+		client.Model = "qwen3-max"
 		log.Printf("🔧 [MCP] Qwen 使用默认 Model: %s", client.Model)
 	}
 	// 打印 API Key 的前后各4位用于验证
